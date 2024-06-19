@@ -1,0 +1,234 @@
+```{r}
+library(phyloseq)
+library(microbiome)
+library(DESeq2)
+library(apeglm)
+library(pheatmap)
+
+source("./scripts/common_tools.R")
+source("./scripts/common_meta_transform_class.R")
+source("./scripts/diff_abundance_class.R")
+source("./scripts/diff_abundance_tools.R")
+source("./scripts/heatmap_tools.R")
+```
+
+```{r}
+ps <- readRDS("./files/ps_cleanV2_det1_prev3_noF.rds")
+ps <- prune_samples(ps@sam_data$specimen_type == "PL", ps)
+```
+
+
+```{r}
+current_ps <- ps
+
+min_reads <- 1000
+prevalence <- 0.03
+detection <- 1
+tax_glom_level <- 'Species'
+# ==============================================================================
+transforms <- CommonMetaTransform$new(min_reads=min_reads,detection=detection,
+                                      prevalence=prevalence, tax_glom_level=tax_glom_level)
+current_ps <- transforms$execute(current_ps)
+```
+
+```{r}
+design_formula = ~ Пол + Группа.по.стоматологическому.статусу_short + Принимал.ли.пациент.антибиотики.в.течении.месяца.до.госпитализации
+ref_values <- list(
+  "Пол" = "м",
+  "Группа.по.стоматологическому.статусу_short" = "выс_рез_здор",
+  "Принимал.ли.пациент.антибиотики.в.течении.месяца.до.госпитализации" = "нет"
+)
+```
+
+## DESEQ2 ##
+```{r}
+dds <- ps_to_deseq2(current_ps, design_formula = design_formula, ref_values = ref_values)
+```
+
+```{r}
+results <- prepare_deseq2_feature_table(dds)
+print(paste0("N_taxa: ", length(results$taxa)))
+```
+```{r}
+## Хочу поиграться, осавить только таксоны с положитеьным lfc по полу
+
+results$prune_taxa(
+  results$lfc_table[["Пол_ж_vs_м"]] > 0
+)
+print(paste0("N_taxa: ", length(results$taxa)))
+
+## Есть также prune_columns, но туда подается атомик вектор из интересующих колонок, а не boolarray как в примере выше
+```
+
+
+
+```{r}
+# Теперь можно поиграться со звездами и повыставлять кастомные пороги
+
+results$pval_to_stars()
+```
+
+## Heatmap DESEQ2
+
+```{r}
+# Дефайним параметры для хитмапы.
+# Перед построением хитмапы обязательно инициализируйте таблицу со звездами
+
+filepath <- './viz/glm_deseq2_heatmap.pdf'
+relevant_colnames <- c("Пол_ж_vs_м", "Группа.по.стоматологическому.статусу_short_сред_низ_рез_нездор_vs_выс_рез_здор", "Принимал.ли.пациент.антибиотики.в.течении.месяца.до.госпитализации_да_vs_нет")
+relevant_colnames_rename_to <- c("Sex_female_vs_male", "Dental_status_low_mid_res_sick_vs_high_res_healthy", "Antibiotics_month_before_hospital_yes_vs_no")
+```
+
+```{r}
+# Тык! (строим)
+plot_one_tool_on_multiple_features_heatmap(current_ps, results, filepath, relevant_colnames, relevant_colnames_rename_to)
+```
+
+# Для остальных тулов все +- то же самое
+
+## ALDEX2 ##
+```{r}
+results <- prepare_aldex2_feature_table(current_ps, design_formula, ref_values)
+```
+```{r}
+results$pval_to_stars()
+```
+
+## Heatmap ALDEX2
+```{r}
+filepath <- './viz/glm_deseq2_heatmap.pdf'
+relevant_colnames <- c("Пол_ж_vs_м", "Группа.по.стоматологическому.статусу_short_сред_низ_рез_нездор_vs_выс_рез_здор", "Принимал.ли.пациент.антибиотики.в.течении.месяца.до.госпитализации_да_vs_нет")
+relevant_colnames_rename_to <- c("Sex_female_vs_male", "Dental_status_low_mid_res_sick_vs_high_res_healthy", "Antibiotics_month_before_hospital_yes_vs_no")
+```
+
+```{r}
+plot_one_tool_on_multiple_features_heatmap(current_ps, results, filepath, relevant_colnames, relevant_colnames_rename_to)
+```
+
+
+## ANCOMBC2 ##
+```{r}
+# В ANCOMBC первым формулу он принимает как строку без тильды
+
+results <- prepare_ancombc2_feature_table(current_ps, as.character(design_formula)[2], ref_values)
+```
+
+```{r}
+results$pval_to_stars()
+```
+
+## Heatmap ALDEX2
+```{r}
+filepath <- './viz/glm_deseq2_heatmap.pdf'
+relevant_colnames <- c("Пол_ж_vs_м", "Группа.по.стоматологическому.статусу_short_сред_низ_рез_нездор_vs_выс_рез_здор", "Принимал.ли.пациент.антибиотики.в.течении.месяца.до.госпитализации_да_vs_нет")
+relevant_colnames_rename_to <- c("Sex_female_vs_male", "Dental_status_low_mid_res_sick_vs_high_res_healthy", "Antibiotics_month_before_hospital_yes_vs_no")
+```
+
+```{r}
+plot_one_tool_on_multiple_features_heatmap(current_ps, results, filepath, relevant_colnames, relevant_colnames_rename_to)
+```
+
+## Raw GLM ##
+
+```{r}
+# source("./scripts/diff_abundance_tools.R")
+results <- prepare_raw_glm_feature_table(current_ps, design_formula, ref_values)
+```
+
+```{r}
+lfc_table <- results[["lfc_table"]]
+pval_stars <- pval_to_stars(results[["pval_table"]])
+```
+
+```{r}
+remove(results)
+```
+
+## Heatmap Raw_glm
+```{r}
+filepath <- './viz/glm_raw_heatmap.pdf'
+relevant_colnames <- c("Пол_ж_vs_м", "Группа.по.стоматологическому.статусу_short_сред_низ_рез_нездор_vs_выс_рез_здор", "Принимал.ли.пациент.антибиотики.в.течении.месяца.до.госпитализации_да_vs_нет")
+relevant_colnames_rename_to <- c("Sex_female_vs_male", "Dental_status_low_mid_res_sick_vs_high_res_healthy", "Antibiotics_month_before_hospital_yes_vs_no")
+  
+plot_diff_abundance_heatmap(current_ps, transforms, lfc_table, pval_stars, filepath, relevant_colnames, relevant_colnames_rename_to)
+```
+
+## ALTOGETHER ##
+
+```{r}
+# Еще есть обертка, из под которой можно запускать все тулы
+# Первым аргументом у нее собственно тул и идет
+
+#results <- prepare_feature_table("DESeq2", current_ps, design_formula, ref_values)
+#results <- prepare_feature_table("ALDEx2", current_ps, design_formula, ref_values)
+results <- prepare_feature_table("ANCOMBC", current_ps, design_formula, ref_values)
+#results <- prepare_feature_table("glm_raw", current_ps, design_formula, ref_values)
+```
+
+# Много тулов на одну фичу
+
+```{r}
+# Еще есть аггрегирующая функция, которая выдает лист результатов для всех тулов
+
+common_results <- get_multiple_tools_feature_table(current_ps, design_formula, ref_values)
+```
+
+```{r}
+# Это специальный объект ExpandedDiffAbundanceComputationResult. Тут можно обращаться к тулам по $, а также по $ можно подучать сами тулы, такосны и колонки
+# Далее надо пройтись и отдельно ручками выставить звездочки на свое усмотрение со своими порогами.
+
+common_results$DESeq2$pval_to_stars()
+common_results$ALDEx2$pval_to_stars()
+common_results$ANCOMBC$pval_to_stars()
+common_results$glm_raw$pval_to_stars()
+
+# Также тут можно пофильтровать таксоны и т.п.
+```
+
+
+```{r}
+#target_feature <- "Принимал.ли.пациент.антибиотики.в.течении.месяца.до.госпитализации_да_vs_нет"
+#target_feature <- "Группа.по.стоматологическому.статусу_short_сред_низ_рез_нездор_vs_выс_рез_здор"
+target_feature <- "Пол_ж_vs_м"
+
+#heatmap_title <- "Antibiotics_month\n_before_hospital\n_yes_vs_no"
+#heatmap_title <- "Dental_status_\nlow_mid_res_sick_\nvs_high_res_healthy"
+heatmap_title <- "Sex_female_vs_male"
+
+
+#filename <- "./viz/diff_abund_several_tools_result_Antibiotics_month_before_hospital_yes_vs_no.pdf"
+#filename <- "./viz/diff_abund_several_tools_result_Dental_status_low_mid_res_sick_vs_high_res_healthy.pdf"
+filename <- "./viz/diff_abund_several_tools_result_Sex_female_vs_male.pdf"
+
+```
+
+
+```{r}
+plot_multiple_tools_on_one_feature_heatmap(current_ps, common_results, target_feature, heatmap_title, filename)
+```
+
+# Много тулов на много фичей
+```{r}
+# Тут нам опять потребуется результат для множества тулов. Его мы получали на пред шаге
+# Тут пороги для звезд и сами звезды проставляются также отдельно
+```
+
+```{r}
+n_stars_detection <- 1
+filename <- paste0("./viz/diff_abund_multiple_tools_multiple_features_result_",n_stars_detection, "_stars.pdf")
+
+relevant_meta_features <- c("Пол_ж_vs_м", "Группа.по.стоматологическому.статусу_short_сред_низ_рез_нездор_vs_выс_рез_здор", "Принимал.ли.пациент.антибиотики.в.течении.месяца.до.госпитализации_да_vs_нет")
+relevant_meta_features_rename_to <- c("Sex_female_vs_male", "Dental_status_low_mid_res_sick_vs_high_res_healthy", "Antibiotics_month_before_hospital_yes_vs_no")
+```
+
+
+```{r}
+plot_multiple_tools_on_multiple_features_heatmap(current_ps, common_results, filename, relevant_meta_features, relevant_meta_features_rename_to,
+                                                 n_stars_detection=n_stars_detection, heatmap_title = "Number of tools\nthat give\nsignificant LFC")
+```
+
+
+
+
+
+
